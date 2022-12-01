@@ -19,7 +19,7 @@ import (
 
 // Controller maintains a mapping between IP addresses and Pods
 type Controller interface {
-	Run(stopChannel chan struct{}) error
+	Run(stopChannel <-chan struct{}) error
 	LookupIP(ip net.IP) (string, string)
 	LookupAddr(addr netip.Addr) (string, string)
 }
@@ -71,8 +71,9 @@ func newControllerFromFactory(l logr.Logger, ignoreNamespaces []string, inf info
 	return c, nil
 }
 
-// Run
-func (c *controller) Run(stopChannel chan struct{}) error {
+// Run sets up the controller to continuously watch for Pod events, until
+// stop channel is signalled/closed.
+func (c *controller) Run(stopChannel <-chan struct{}) error {
 	c.log = c.log.WithName("podip-controller")
 	c.log.Info("running...")
 	if len(c.skipNS) > 0 {
@@ -89,7 +90,10 @@ func (c *controller) Run(stopChannel chan struct{}) error {
 		},
 	)
 	c.inf.Start(stopChannel)
-	// wait for the initial synchronization of the local cache
+
+	// hold lock while waiting for the initial synchronization of the local cache
+	c.lock.Lock()
+	defer c.lock.Unlock()
 	if !cache.WaitForCacheSync(stopChannel, podInformer.Informer().HasSynced) {
 		return fmt.Errorf("failed to synchronize Pod informer cache")
 	}
@@ -109,6 +113,9 @@ func (c *controller) LookupIP(ip net.IP) (string, string) {
 // LookupAddr returns the Pod name and namespace corresponding to the provided address.
 // Empty strings are returned if no matching Pod is found.
 func (c *controller) LookupAddr(addr netip.Addr) (string, string) {
+	c.lock.RLock()
+	defer c.lock.RUnlock()
+
 	pod, found := c.pods[addr]
 	if !found {
 		return "", ""
@@ -133,6 +140,10 @@ func (c *controller) podAdd(obj interface{}) {
 		}
 		return
 	}
+
+	c.lock.Lock()
+	defer c.lock.Unlock()
+
 	for _, ip := range pod.Status.PodIPs {
 		key, err := netip.ParseAddr(ip.IP)
 		if err != nil {
@@ -167,6 +178,9 @@ func (c *controller) podDelete(obj interface{}) {
 	if len(pod.Status.PodIPs) == 0 { // nothing to clear
 		return
 	}
+
+	c.lock.Lock()
+	defer c.lock.Unlock()
 
 	c.log.Info("deleting Pod", "name", namespacedName(pod))
 	for _, ip := range pod.Status.PodIPs {
