@@ -27,25 +27,26 @@ func newClientSet() (*kubernetes.Clientset, error) {
 func config() (*rest.Config, error) {
 	var config *rest.Config
 	var err error
+
 	if _, inCluster := os.LookupEnv("KUBERNETES_SERVICE_HOST"); inCluster {
 		config, err = rest.InClusterConfig()
 		if err != nil {
 			return nil, err
 		}
-	} else {
-		defaultKubeConfigPath := ""
+		return config, err
+	}
 
-		if defaultKubeConfigPath = os.Getenv(clientcmd.RecommendedConfigPathEnvVar); defaultKubeConfigPath == "" {
-			if homedir.HomeDir() != "" {
-				defaultKubeConfigPath = clientcmd.RecommendedHomeFile
-			}
+	defaultKubeConfigPath := ""
+	if defaultKubeConfigPath = os.Getenv(clientcmd.RecommendedConfigPathEnvVar); defaultKubeConfigPath == "" {
+		if homedir.HomeDir() != "" {
+			defaultKubeConfigPath = clientcmd.RecommendedHomeFile
 		}
-		kubeconfig := flag.String(clientcmd.RecommendedConfigPathFlag, defaultKubeConfigPath, "path to the kubeconfig file")
-		flag.Parse()
-		config, err = clientcmd.BuildConfigFromFlags("", *kubeconfig)
-		if err != nil {
-			return nil, err
-		}
+	}
+	kubeconfig := flag.String(clientcmd.RecommendedConfigPathFlag, defaultKubeConfigPath, "path to the kubeconfig file")
+	flag.Parse()
+	config, err = clientcmd.BuildConfigFromFlags("", *kubeconfig)
+	if err != nil {
+		return nil, err
 	}
 	return config, err
 }
